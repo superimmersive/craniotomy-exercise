@@ -276,8 +276,8 @@ export const viewerReady = new Promise(function (resolve) {
 
   function clampOrbitRadius(next) {
     var orbit = viewer.getCameraOrbit();
-    var minR = baseRadius * 0.25;
-    var maxR = baseRadius * 4;
+    var minR = baseRadius * 0.95;
+    var maxR = baseRadius * 1.5;
     if (next < minR) next = minR;
     if (next > maxR) next = maxR;
     viewer.cameraOrbit = orbit.theta + "rad " + orbit.phi + "rad " + next + "m";
