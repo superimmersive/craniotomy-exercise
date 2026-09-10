@@ -1,11 +1,12 @@
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
 
 var ITEMS = [
   { id: "scalpel", src: "assets/models/Scalpel.glb" },
   { id: "drill", src: "assets/models/cranial%20drill.glb" },
   { id: "craniotome", src: "assets/models/Craniotome.glb" },
   { id: "elevator", src: "assets/models/boneFlapElevator.glb" },
-  { id: "bowl", src: "assets/models/spongeBowl.glb" }
+  { id: "bowl", src: "assets/models/spongeBowl.glb?v=" + Date.now() }
 ];
 
 var FLOOR_Y = 0.002;
@@ -24,6 +25,96 @@ var PICK = {
   craniotome: [0.05, 0.2, 0.05],
   elevator: [0.04, 0.04, 0.18]
 };
+
+function brushedMetalMaterial(THREE) {
+  var brush = makeBrushTexture(THREE, 512);
+  var mat = new THREE.MeshPhysicalMaterial({
+    name: "ToolBrushedMetal",
+    color: 0xb7c0c8,
+    metalness: 1,
+    roughness: 0.34,
+    roughnessMap: brush,
+    envMapIntensity: 1.25,
+    toneMapped: true,
+    emissive: 0x000000,
+    vertexColors: false,
+    clearcoat: 0.12,
+    clearcoatRoughness: 0.55,
+    reflectivity: 0.9
+  });
+  if ("anisotropy" in mat) {
+    mat.anisotropy = 0.85;
+    mat.anisotropyMap = brush;
+    mat.anisotropyRotation = 0;
+  }
+  return mat;
+}
+
+function applyBrushedMetal(root, template) {
+  root.traverse(function (child) {
+    if (!child.isMesh || child.userData.pickProxy) return;
+    var cloned = template.clone();
+    cloned.roughnessMap = template.roughnessMap;
+    if (template.anisotropyMap) cloned.anisotropyMap = template.anisotropyMap;
+    cloned.vertexColors = false;
+    cloned.needsUpdate = true;
+    child.material = cloned;
+  });
+}
+
+function makeBrushTexture(THREE, size) {
+  var canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  var ctx = canvas.getContext("2d");
+  var img = ctx.createImageData(size, size);
+  var data = img.data;
+  var y;
+  var x;
+  var i;
+  var grain;
+  var v;
+  for (y = 0; y < size; y++) {
+    grain = Math.random() * 0.1;
+    for (x = 0; x < size; x++) {
+      i = (y * size + x) * 4;
+      v = 0.52 + Math.sin(y * 1.15) * 0.05 + grain + (Math.random() - 0.5) * 0.16;
+      v = Math.max(0, Math.min(1, v));
+      v = Math.round(v * 255);
+      data[i] = v;
+      data[i + 1] = v;
+      data[i + 2] = v;
+      data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  var tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(8, 8);
+  tex.anisotropy = 8;
+  tex.needsUpdate = true;
+  if (THREE.LinearSRGBColorSpace) tex.colorSpace = THREE.LinearSRGBColorSpace;
+  return tex;
+}
+
+function smoothBowlNormals(root) {
+  root.traverse(function (child) {
+    if (!child.isMesh || child.userData.pickProxy || !child.geometry) return;
+    var geo = mergeVertices(child.geometry, 1e-4);
+    geo.computeVertexNormals();
+    if (geo.computeTangents && geo.getAttribute("uv")) {
+      try { geo.computeTangents(); } catch (err) {}
+    }
+    child.geometry = geo;
+    var mats = Array.isArray(child.material) ? child.material : [child.material];
+    for (var i = 0; i < mats.length; i++) {
+      if (!mats[i]) continue;
+      mats[i].flatShading = false;
+      mats[i].needsUpdate = true;
+    }
+  });
+}
 
 function prepare(root) {
   root.traverse(function (child) {
@@ -134,6 +225,7 @@ export function loadTools(scene, THREE) {
   scene.add(kit);
 
   var loader = new GLTFLoader();
+  var metal = brushedMetalMaterial(THREE);
   return Promise.all(ITEMS.map(function (item) {
     return new Promise(function (resolve) {
       loader.load(
@@ -142,6 +234,8 @@ export function loadTools(scene, THREE) {
           var root = gltf.scene || gltf.scenes[0];
           root.name = "tool-" + item.id;
           prepare(root);
+          applyBrushedMetal(root, metal);
+          if (item.id === "bowl") smoothBowlNormals(root);
           kit.add(root);
           root.updateMatrixWorld(true);
           resolve({

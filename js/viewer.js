@@ -345,6 +345,198 @@ export const viewerReady = new Promise(function (resolve) {
     if (mv.jumpCameraToGoal) mv.jumpCameraToGoal();
   }
 
+  var BONE_OBJECTS = { Bones_01: true, Bones_02: true, SkullCap: true };
+
+  function isBoneMaterialName(name) {
+    name = (name || "").toLowerCase();
+    return name === "bone";
+  }
+
+  function applyMvBoneTexture(mv, texture) {
+    var materials = mv.model && mv.model.materials;
+    if (!materials || !texture) return false;
+    var applied = false;
+    var i;
+    var mat;
+    var slot;
+    for (i = 0; i < materials.length; i++) {
+      mat = materials[i];
+      if (!mat || !isBoneMaterialName(mat.name)) continue;
+      if (mat.pbrMetallicRoughness && mat.pbrMetallicRoughness.setBaseColorFactor) {
+        mat.pbrMetallicRoughness.setBaseColorFactor([1, 1, 1, 1]);
+      }
+      slot = mat.pbrMetallicRoughness && mat.pbrMetallicRoughness.baseColorTexture;
+      if (slot && typeof slot.setTexture === "function") {
+        slot.setTexture(texture);
+        applied = true;
+      }
+    }
+    return applied;
+  }
+
+  function applyThreeBoneImage(scene, image) {
+    var sample = null;
+    scene.traverse(function (child) {
+      if (sample || !child.isMesh) return;
+      var mat = Array.isArray(child.material) ? child.material[0] : child.material;
+      if (mat && mat.map && typeof mat.map.clone === "function") sample = mat.map;
+    });
+    scene.traverse(function (child) {
+      if (!child.isMesh) return;
+      var mats = Array.isArray(child.material) ? child.material.slice() : [child.material];
+      var changed = false;
+      var i;
+      var mat;
+      var cloned;
+      var tex;
+      var boneObj = BONE_OBJECTS[child.name];
+      for (i = 0; i < mats.length; i++) {
+        mat = mats[i];
+        if (!mat) continue;
+        if ((mat.name || "") === "Teeth") continue;
+        if (!isBoneMaterialName(mat.name) && !boneObj) continue;
+        cloned = mat.clone();
+        if (sample) {
+          tex = sample.clone();
+          tex.image = image;
+          if (tex.repeat) tex.repeat.set(2, 2);
+          if (tex.wrapS != null && THREE.RepeatWrapping) {
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+          }
+          tex.needsUpdate = true;
+          cloned.map = tex;
+        }
+        if (cloned.color) cloned.color.set(0xffffff);
+        cloned.needsUpdate = true;
+        mats[i] = cloned;
+        changed = true;
+      }
+      if (!changed) return;
+      child.material = Array.isArray(child.material) ? mats : mats[0];
+    });
+    if (typeof scene.queueRender === "function") scene.queueRender();
+  }
+
+  function loadBoneDiffuse(mv, scene) {
+    var uri = "assets/textures/bone-diffuse.jpg";
+    function fallback() {
+      var img = new Image();
+      img.onload = function () {
+        applyThreeBoneImage(scene, img);
+      };
+      img.src = uri;
+    }
+    if (typeof mv.createTexture !== "function") {
+      fallback();
+      return;
+    }
+    mv.createTexture(uri, "image/jpeg").then(function (texture) {
+      try {
+        if (texture && texture.sampler) {
+          if (texture.sampler.setWrapS) texture.sampler.setWrapS("repeat");
+          if (texture.sampler.setWrapT) texture.sampler.setWrapT("repeat");
+        }
+      } catch (err) {}
+      if (!applyMvBoneTexture(mv, texture)) fallback();
+      else if (typeof scene.queueRender === "function") scene.queueRender();
+    }).catch(fallback);
+  }
+
+  function isBrainMaterialName(name) {
+    name = (name || "").toLowerCase();
+    return name === "brain_low" || name === "brain";
+  }
+
+  function applyMvBrainTexture(mv, texture) {
+    var materials = mv.model && mv.model.materials;
+    if (!materials || !texture) return false;
+    var applied = false;
+    var i;
+    var mat;
+    var pbr;
+    var slot;
+    for (i = 0; i < materials.length; i++) {
+      mat = materials[i];
+      if (!mat || !isBrainMaterialName(mat.name)) continue;
+      pbr = mat.pbrMetallicRoughness;
+      if (pbr && pbr.setBaseColorFactor) pbr.setBaseColorFactor([1, 1, 1, 1]);
+      if (pbr && pbr.setMetallicFactor) pbr.setMetallicFactor(0);
+      if (pbr && pbr.setRoughnessFactor) pbr.setRoughnessFactor(0.65);
+      slot = pbr && pbr.baseColorTexture;
+      if (slot && typeof slot.setTexture === "function") {
+        slot.setTexture(texture);
+        applied = true;
+      }
+      slot = pbr && pbr.metallicRoughnessTexture;
+      if (slot && typeof slot.setTexture === "function") {
+        slot.setTexture(null);
+      }
+    }
+    return applied;
+  }
+
+  function applyThreeBrainTexture(scene, tex) {
+    if (!tex) return;
+    tex.flipY = false;
+    if (tex.repeat) tex.repeat.set(1, 1);
+    if (THREE.ClampToEdgeWrapping) {
+      tex.wrapS = THREE.ClampToEdgeWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
+    }
+    if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
+    tex.needsUpdate = true;
+    scene.traverse(function (child) {
+      if (!child.isMesh) return;
+      var brainObj = child.name === "Brain";
+      var mats = Array.isArray(child.material) ? child.material.slice() : [child.material];
+      var changed = false;
+      var i;
+      var mat;
+      var cloned;
+      for (i = 0; i < mats.length; i++) {
+        mat = mats[i];
+        if (!mat) continue;
+        if (!isBrainMaterialName(mat.name) && !brainObj) continue;
+        cloned = mat.clone();
+        cloned.map = tex;
+        if (cloned.color) cloned.color.set(0xffffff);
+        cloned.metalness = 0;
+        cloned.roughness = 0.62;
+        cloned.metalnessMap = null;
+        cloned.roughnessMap = null;
+        cloned.needsUpdate = true;
+        mats[i] = cloned;
+        changed = true;
+      }
+      if (!changed) return;
+      child.material = Array.isArray(child.material) ? mats : mats[0];
+    });
+    if (typeof scene.queueRender === "function") scene.queueRender();
+  }
+
+  function loadBrainDiffuse(mv, scene) {
+    var uri = "assets/textures/brain-low-basecolor.jpg";
+    function applyThree() {
+      var loader = new THREE.TextureLoader();
+      loader.load(uri, function (tex) {
+        applyThreeBrainTexture(scene, tex);
+      });
+    }
+    applyThree();
+    if (typeof mv.createTexture !== "function") return;
+    mv.createTexture(uri, "image/jpeg").then(function (texture) {
+      try {
+        if (texture && texture.sampler) {
+          if (texture.sampler.setWrapS) texture.sampler.setWrapS("clamp-to-edge");
+          if (texture.sampler.setWrapT) texture.sampler.setWrapT("clamp-to-edge");
+        }
+      } catch (err) {}
+      applyMvBrainTexture(mv, texture);
+      if (typeof scene.queueRender === "function") scene.queueRender();
+    }).catch(function () {});
+  }
+
   function addSceneHelpers(mv) {
     var scene = getScene(mv);
     if (!scene) {
@@ -353,6 +545,8 @@ export const viewerReady = new Promise(function (resolve) {
     }
 
     addFloorGrid(scene, THREE, mv);
+    loadBoneDiffuse(mv, scene);
+    loadBrainDiffuse(mv, scene);
     aimAtAnatomyHeight(scene);
 
     loadTools(scene, THREE)

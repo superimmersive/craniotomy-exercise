@@ -292,15 +292,10 @@ export function bindToolHold(ctx, sequence, spec) {
       return;
     }
     if (!live() || !eventOver(event, viewer)) {
-      if (live()) {
-        setCursor(false);
-        viewer.cameraControls = true;
-      }
+      if (live()) setCursor(false);
       return;
     }
-    var over = hitTool(event);
-    setCursor(over);
-    viewer.cameraControls = !over;
+    setCursor(hitTool(event));
   }
 
   function onPointerUp(event) {
@@ -344,6 +339,7 @@ export function bindToolHold(ctx, sequence, spec) {
   viewer.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp, true);
   window.addEventListener("pointercancel", onPointerUp, true);
+  viewer.addEventListener("lostpointercapture", onPointerUp);
   window.addEventListener("keydown", onKeyDown);
   viewer.addEventListener("camera-change", onCameraChange);
   sequence.onChange(onSequenceChange);
@@ -365,6 +361,7 @@ export function bindToolHold(ctx, sequence, spec) {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("pointerup", onPointerUp, true);
       window.removeEventListener("pointercancel", onPointerUp, true);
+      viewer.removeEventListener("lostpointercapture", onPointerUp);
       viewer.removeEventListener("pointermove", onPointerMove);
       viewer.removeEventListener("camera-change", onCameraChange);
       putBack();

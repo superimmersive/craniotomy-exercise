@@ -260,12 +260,9 @@ export function bindScalpelPickup(ctx, sequence) {
     }
     if (!scalpelLive() || !eventOver(event, viewer)) {
       setCursor(false);
-      if (scalpelLive()) viewer.cameraControls = true;
       return;
     }
-    var over = hitScalpel(event);
-    setCursor(over);
-    viewer.cameraControls = !over;
+    setCursor(hitScalpel(event));
   }
 
   function onPointerUp(event) {
@@ -322,6 +319,7 @@ export function bindScalpelPickup(ctx, sequence) {
   viewer.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp, true);
   window.addEventListener("pointercancel", onPointerUp, true);
+  viewer.addEventListener("lostpointercapture", onPointerUp);
   window.addEventListener("keydown", onKeyDown);
   viewer.addEventListener("camera-change", onCameraChange);
   sequence.onChange(onSequenceChange);
@@ -350,6 +348,7 @@ export function bindScalpelPickup(ctx, sequence) {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("pointerup", onPointerUp, true);
       window.removeEventListener("pointercancel", onPointerUp, true);
+      viewer.removeEventListener("lostpointercapture", onPointerUp);
       viewer.removeEventListener("pointermove", onPointerMove);
       viewer.removeEventListener("camera-change", onCameraChange);
       putBack();

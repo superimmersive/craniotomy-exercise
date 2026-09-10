@@ -25,28 +25,39 @@ html, body {
 }
 
 body {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  display: block;
 }
 
 .chrome {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0.75rem 1.5rem;
-  padding: 1rem 1.25rem;
-  border-top: 1px solid var(--hair);
+  padding: 2rem 1.25rem 1rem;
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
-  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(2, 6, 23, 0.78) 0%, rgba(2, 6, 23, 0.28) 55%, rgba(2, 6, 23, 0) 100%);
 }
 
 .mark {
+  position: absolute;
+  top: 1rem;
+  left: 1.25rem;
+  z-index: 2;
   margin: 0;
+  pointer-events: none;
   font-family: var(--display);
-  font-size: 1.05rem;
+  font-size: 1.85rem;
+  font-weight: 500;
   letter-spacing: -0.04em;
+  text-shadow: 0 1px 8px rgba(2, 6, 23, 0.85);
 }
 
 .hint {
@@ -59,27 +70,13 @@ body {
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--ink-soft);
-}
-
-.reset {
-  margin-left: auto;
-  padding: 0.45rem 0.8rem;
-  border: 1px solid var(--hair);
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  font-size: 10px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.reset:hover {
-  border-color: rgba(248, 250, 252, 0.45);
+  text-shadow: 0 1px 8px rgba(2, 6, 23, 0.85);
 }
 
 .stage {
   position: relative;
+  width: 100%;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -124,7 +121,7 @@ body {
 
 .briefing {
   --ui-title: rgb(235, 245, 255);
-  --ui-panel: rgb(18, 23, 33);
+  --ui-panel: rgba(18, 23, 33, 0.82);
   --ui-continue: rgb(46, 117, 214);
   --ui-skip: rgb(107, 82, 51);
   --ui-restart: rgb(36, 133, 112);
@@ -207,14 +204,21 @@ body {
   text-overflow: ellipsis;
 }
 
-.briefing__mute {
+.briefing__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  margin: -2px -4px 0 0;
+}
+
+.briefing__icon {
   flex: 0 0 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 32px;
   height: 32px;
-  margin: -2px -4px 0 0;
   padding: 0;
   border: 0;
   border-radius: 8px;
@@ -223,9 +227,17 @@ body {
   cursor: pointer;
 }
 
-.briefing__mute svg {
+.briefing__icon svg {
   width: 18px;
   height: 18px;
+}
+
+.briefing__icon:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.briefing__icon:active {
+  filter: brightness(0.85);
 }
 
 .briefing__mute-off {
@@ -238,14 +250,6 @@ body {
 
 .briefing__mute.is-muted .briefing__mute-off {
   display: block;
-}
-
-.briefing__mute:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.briefing__mute:active {
-  filter: brightness(0.85);
 }
 
 .briefing__body {

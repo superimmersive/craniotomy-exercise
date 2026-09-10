@@ -23,7 +23,6 @@ export function bindVoiceover(sequence) {
 
   function wantedKey() {
     if (sequence.isComplete) return "complete";
-    if (!sequence.isBriefing) return null;
     var step = sequence.currentStep;
     return step ? step.id : null;
   }

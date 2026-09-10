@@ -82,9 +82,10 @@ export function bindIncision(ctx, sequence, pickup, curveJson) {
   }
 
   function showGuides(on) {
-    group.visible = on || progress > 0.002;
     if (ghost) ghost.visible = on && !step.isComplete;
     marker.visible = on && !step.isComplete;
+    if (cutMesh) cutMesh.visible = on && sequence.currentStep === step;
+    group.visible = on || !!(cutMesh && cutMesh.visible);
   }
 
   function rebuildCut(amount) {
@@ -92,9 +93,11 @@ export function bindIncision(ctx, sequence, pickup, curveJson) {
     cutMesh = null;
     built = amount;
     if (amount < 0.002) return;
-    cutMesh = makeTube(THREE, samplePath(path, 0, amount, Math.max(8, Math.ceil(amount * 48))), 0.0014, CUT_COLOR, 1);
+    cutMesh = makeTube(THREE, samplePath(path, 0, amount, Math.max(8, Math.ceil(amount * 48))), 0.001, CUT_COLOR, 1);
     if (cutMesh) {
       cutMesh.name = "incision-cut";
+      cutMesh.material.depthWrite = true;
+      cutMesh.material.needsUpdate = true;
       group.add(cutMesh);
     }
   }

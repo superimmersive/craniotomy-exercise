@@ -9,7 +9,10 @@ var MAX_SPEED = 0.08;
 var SHARPNESS = 12;
 var COMPLETE_AT = 0.99;
 var GHOST_COLOR = 0xcbd5e1;
-var CUT_COLOR = 0xd6d3d1;
+var CUT_COLOR = 0x3f3a36;
+var CUT_RADIUS = 0.001;
+var CUT_FADE_RADIUS = 0.0005;
+var CUT_FADE_OPACITY = 0.08;
 var MARKER_COLOR = 0x38bdf8;
 var HOLE1 = { x: 0.0535, y: 0.3403, z: 0.0027 };
 
@@ -71,10 +74,12 @@ export function bindCraniotome(ctx, sequence, curveJson, hole1) {
   var targetT = 0;
   var lastTime = performance.now();
   var built = -1;
+  var builtRadius = -1;
   var ticking = 0;
   var cursorX = 0;
   var cursorY = 0;
   var hasCursor = false;
+  var cutFade = 0;
 
   var hold = bindToolHold(ctx, sequence, {
     toolId: "craniotome",
@@ -91,26 +96,49 @@ export function bindCraniotome(ctx, sequence, curveJson, hole1) {
     return step && sequence.currentStep === step && sequence.isWorking && !step.isComplete;
   }
 
+  function shouldFadeCut() {
+    var cur = sequence.currentStep;
+    if (sequence.isComplete) return true;
+    return !!(cur && (cur.id === "boneFlap" || cur.id === "skullCap"));
+  }
+
+  function cutRadius() {
+    return shouldFadeCut() ? CUT_FADE_RADIUS : CUT_RADIUS;
+  }
+
+  function applyCutOpacity() {
+    if (!cutMesh || !cutMesh.material) return;
+    var opacity = 1 - cutFade * (1 - CUT_FADE_OPACITY);
+    cutMesh.material.transparent = opacity < 0.999;
+    cutMesh.material.opacity = opacity;
+    cutMesh.material.depthWrite = opacity > 0.5;
+    cutMesh.material.needsUpdate = true;
+    cutMesh.visible = progress > 0.002;
+  }
+
   function showGuides(on) {
-    group.visible = on || progress > 0.002;
     if (ghost) ghost.visible = on && !step.isComplete;
     marker.visible = on && !step.isComplete;
+    applyCutOpacity();
+    group.visible = on || !!(cutMesh && cutMesh.visible);
   }
 
   function rebuildCut(amount) {
     if (cutMesh && cutMesh.parent) cutMesh.parent.remove(cutMesh);
     cutMesh = null;
     built = amount;
+    builtRadius = cutRadius();
     if (amount < 0.002) return;
     cutMesh = makeTube(
       THREE,
       samplePath(path, 0, amount, Math.max(8, Math.ceil(amount * 64))),
-      0.0016,
+      builtRadius,
       CUT_COLOR,
       1
     );
     if (cutMesh) {
       cutMesh.name = "craniotome-cut";
+      applyCutOpacity();
       group.add(cutMesh);
     }
   }
@@ -125,7 +153,7 @@ export function bindCraniotome(ctx, sequence, curveJson, hole1) {
     targetT = value;
     if (step) step.setProgress(value);
     sequence.ping();
-    if (Math.abs(value - built) >= 0.004 || value >= 1 || value <= 0) rebuildCut(value);
+    if (Math.abs(value - built) >= 0.004 || value >= 1 || value <= 0 || cutRadius() !== builtRadius) rebuildCut(value);
     placeMarker();
     showGuides(sequence.currentStep === step);
     queueRender();
@@ -205,11 +233,21 @@ export function bindCraniotome(ctx, sequence, curveJson, hole1) {
 
   function tick(now) {
     ticking = requestAnimationFrame(tick);
+    var dt = Math.min(0.05, (now - lastTime) / 1000);
     track(now);
+    var wantFade = shouldFadeCut() ? 1 : 0;
+    if (Math.abs(wantFade - cutFade) > 0.002) {
+      cutFade += (wantFade - cutFade) * (1 - Math.exp(-6 * dt));
+      applyCutOpacity();
+      queueRender();
+    } else {
+      cutFade = wantFade;
+    }
     showGuides(sequence.currentStep === step && !sequence.isComplete);
   }
 
   function onChange() {
+    if (progress > 0.002 && cutRadius() !== builtRadius) rebuildCut(progress);
     showGuides(sequence.currentStep === step && !sequence.isComplete);
     if (sequence.currentStep === step) placeMarker();
     queueRender();

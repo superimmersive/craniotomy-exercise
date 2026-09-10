@@ -8,9 +8,15 @@ import {
 
 var SEAT_RADIUS = 0.08;
 var SEAT_PX = 80;
-var PULSE = { r: 0.2, g: 0.75, b: 1 };
+var GRAVITY = -4.2;
+var RESTITUTION = 0.28;
+var AIR_DAMP = 1.6;
+var XY_PULL = 10;
+var SETTLE_SPEED = 0.05;
+var PULSE = { r: 0, g: 0.62, b: 1 };
 var PULSE_HZ = 0.9;
-var PULSE_BLEND = 0.7;
+var PULSE_BLEND = 1;
+var PULSE_INTENSITY = 2.4;
 
 export function bindSkullCap(ctx, sequence) {
   var THREE = ctx.THREE;
@@ -29,6 +35,8 @@ export function bindSkullCap(ctx, sequence) {
   var planeHit = new THREE.Vector3();
   var capPos = new THREE.Vector3();
   var placePos = new THREE.Vector3();
+  var seatPos = new THREE.Vector3();
+  var vel = new THREE.Vector3();
   var pulseColor = new THREE.Color(PULSE.r, PULSE.g, PULSE.b);
   var box = new THREE.Box3();
   var boxCenter = new THREE.Vector3();
@@ -46,12 +54,17 @@ export function bindSkullCap(ctx, sequence) {
     if (!box.isEmpty()) {
       box.getCenter(placePos);
       placePos.y = box.max.y + 0.012;
+      seatPos.copy(placePos);
+      seatPos.y = box.min.y + Math.max(0.02, (box.max.y - box.min.y) * 0.38);
     } else {
       placePos.copy(bowl.restPosition);
       placePos.y += 0.04;
+      seatPos.copy(placePos);
+      seatPos.y -= 0.045;
     }
   } else {
     placePos.set(0.377, 0.04, 0);
+    seatPos.set(0.377, 0.012, 0);
   }
 
   var marker = new THREE.Mesh(
@@ -69,18 +82,42 @@ export function bindSkullCap(ctx, sequence) {
 
   var held = false;
   var seated = false;
+  var dropping = false;
+  var dropUntil = 0;
   var lifted = false;
   var holdId = null;
   var lastPointer = null;
   var lastFollow = performance.now();
   var ticking = 0;
+  var pulseReady = false;
+
+  function isolateCapMaterials() {
+    if (pulseReady) return;
+    pulseReady = true;
+    cap.traverse(function (child) {
+      if (!child.isMesh || !child.material) return;
+      var src = Array.isArray(child.material) ? child.material : [child.material];
+      var cloned = [];
+      var i;
+      for (i = 0; i < src.length; i++) {
+        var mat = src[i] ? src[i].clone() : src[i];
+        if (mat) {
+          if (mat.emissive) mat.userData.restEmissive = mat.emissive.clone();
+          if (mat.color) mat.userData.restColor = mat.color.clone();
+          mat.userData.restEmissiveIntensity = mat.emissiveIntensity || 0;
+        }
+        cloned.push(mat);
+      }
+      child.material = Array.isArray(child.material) ? cloned : cloned[0];
+    });
+  }
 
   function queueRender() {
     if (typeof ctx.queueRender === "function") ctx.queueRender();
   }
 
   function live() {
-    return step && sequence.currentStep === step && !sequence.isComplete && !seated;
+    return step && sequence.currentStep === step && !sequence.isComplete && !seated && !dropping;
   }
 
   function briefing() {
@@ -88,6 +125,7 @@ export function bindSkullCap(ctx, sequence) {
   }
 
   function setPulse(amount) {
+    isolateCapMaterials();
     cap.traverse(function (child) {
       if (!child.isMesh || !child.material) return;
       var mats = Array.isArray(child.material) ? child.material : [child.material];
@@ -95,7 +133,15 @@ export function bindSkullCap(ctx, sequence) {
         var mat = mats[i];
         if (!mat || !mat.emissive) continue;
         if (!mat.userData.restEmissive) mat.userData.restEmissive = mat.emissive.clone();
-        mat.emissive.copy(mat.userData.restEmissive).lerp(pulseColor, amount);
+        if (!mat.userData.restColor && mat.color) mat.userData.restColor = mat.color.clone();
+        if (mat.userData.restEmissiveIntensity == null) {
+          mat.userData.restEmissiveIntensity = mat.emissiveIntensity || 0;
+        }
+        mat.emissive.copy(pulseColor).multiplyScalar(amount);
+        mat.emissiveIntensity = mat.userData.restEmissiveIntensity + amount * PULSE_INTENSITY;
+        if (mat.color && mat.userData.restColor) {
+          mat.color.copy(mat.userData.restColor).lerp(pulseColor, amount * 0.55);
+        }
       }
     });
   }
@@ -106,7 +152,7 @@ export function bindSkullCap(ctx, sequence) {
   }
 
   function showMarker() {
-    marker.visible = live() && !seated;
+    marker.visible = live() && !seated && !dropping;
   }
 
   function restoreHome() {
@@ -116,29 +162,95 @@ export function bindSkullCap(ctx, sequence) {
     cap.scale.copy(restScale);
     lifted = false;
     seated = false;
+    dropping = false;
+    vel.set(0, 0, 0);
     held = false;
     setPulse(0);
     showMarker();
     queueRender();
   }
 
-  function snapToBowl() {
+  function setWorldPos(world) {
+    if (cap.parent !== scene) scene.attach(cap);
+    cap.parent.updateMatrixWorld(true);
+    cap.position.copy(world);
+    if (cap.parent.worldToLocal) cap.parent.worldToLocal(cap.position);
+  }
+
+  function seatInBowl() {
+    dropping = false;
+    vel.set(0, 0, 0);
     if (holdId != null) {
       try { viewer.releasePointerCapture(holdId); } catch (err) {}
       holdId = null;
     }
-    if (cap.parent !== scene) scene.attach(cap);
-    cap.parent.updateMatrixWorld(true);
-    cap.position.copy(placePos);
-    if (cap.parent.worldToLocal) cap.parent.worldToLocal(cap.position);
+    setWorldPos(seatPos);
     seated = true;
     lifted = true;
     held = false;
     viewer.cameraControls = true;
+    viewer.style.cursor = "";
     setPulse(0);
     showMarker();
     if (step) step.setProgress(1);
     sequence.ping();
+    queueRender();
+  }
+
+  function startDrop() {
+    if (dropping || seated) return;
+    dropping = true;
+    held = false;
+    if (holdId != null) {
+      try { viewer.releasePointerCapture(holdId); } catch (err) {}
+      holdId = null;
+    }
+    viewer.cameraControls = true;
+    viewer.style.cursor = "";
+    setPulse(0);
+    if (cap.parent !== scene) scene.attach(cap);
+    cap.updateMatrixWorld(true);
+    cap.getWorldPosition(capPos);
+    vel.set(
+      (seatPos.x - capPos.x) * 0.4,
+      -0.12,
+      (seatPos.z - capPos.z) * 0.4
+    );
+    lastFollow = performance.now();
+    dropUntil = lastFollow + 1400;
+    showMarker();
+    if (step) step.setProgress(0.99);
+    sequence.ping();
+    queueRender();
+  }
+
+  function tickDrop(now) {
+    var dt = Math.min(0.04, (now - lastFollow) / 1000);
+    if (!(dt > 0)) dt = 1 / 60;
+    lastFollow = now;
+    cap.updateMatrixWorld(true);
+    cap.getWorldPosition(capPos);
+    vel.x += (seatPos.x - capPos.x) * XY_PULL * dt - vel.x * AIR_DAMP * dt;
+    vel.z += (seatPos.z - capPos.z) * XY_PULL * dt - vel.z * AIR_DAMP * dt;
+    vel.y += GRAVITY * dt;
+    capPos.addScaledVector(vel, dt);
+    if (capPos.y <= seatPos.y) {
+      capPos.y = seatPos.y;
+      if (vel.y < 0) vel.y = -vel.y * RESTITUTION;
+      vel.x *= 0.5;
+      vel.z *= 0.5;
+      if (Math.abs(vel.y) < SETTLE_SPEED && vel.length() < SETTLE_SPEED * 3) {
+        seatInBowl();
+        completeIfSeated();
+        return;
+      }
+    }
+    if (now >= dropUntil) {
+      seatInBowl();
+      completeIfSeated();
+      return;
+    }
+    setWorldPos(capPos);
     queueRender();
   }
 
@@ -180,8 +292,7 @@ export function bindSkullCap(ctx, sequence) {
     cap.position.copy(planeHit);
     if (cap.parent && cap.parent.worldToLocal) cap.parent.worldToLocal(cap.position);
     if (nearSeat(event, false)) {
-      snapToBowl();
-      completeIfSeated();
+      startDrop();
       return;
     }
     reportCarry();
@@ -204,7 +315,7 @@ export function bindSkullCap(ctx, sequence) {
   }
 
   function pick(event) {
-    if (held || seated) return;
+    if (held || seated || dropping) return;
     if (sequence.isBriefing) sequence.continueCurrentStep();
     held = true;
     holdId = event && event.pointerId != null ? event.pointerId : null;
@@ -228,9 +339,8 @@ export function bindSkullCap(ctx, sequence) {
     held = false;
     viewer.cameraControls = true;
     viewer.style.cursor = "";
-    if (!seated && nearSeat(event, true)) {
-      snapToBowl();
-      completeIfSeated();
+    if (!seated && !dropping && nearSeat(event, true)) {
+      startDrop();
       return;
     }
     reportCarry();
@@ -254,15 +364,10 @@ export function bindSkullCap(ctx, sequence) {
       return;
     }
     if (!live() || !eventOver(event, viewer)) {
-      if (live()) {
-        viewer.style.cursor = "";
-        viewer.cameraControls = true;
-      }
+      if (live()) viewer.style.cursor = "";
       return;
     }
-    var over = hitCap(event);
-    viewer.style.cursor = over ? "grab" : "";
-    viewer.cameraControls = !over;
+    viewer.style.cursor = hitCap(event) ? "grab" : "";
   }
 
   function onPointerUp(event) {
@@ -294,6 +399,8 @@ export function bindSkullCap(ctx, sequence) {
     if (held && lastPointer) {
       follow(lastPointer);
       lastFollow = performance.now();
+    } else if (dropping) {
+      tickDrop(performance.now());
     } else if (!held && briefing()) {
       setPulse(pulseAmount());
       queueRender();
@@ -308,11 +415,11 @@ export function bindSkullCap(ctx, sequence) {
       restoreHome();
     };
     step.completeStep = function () {
-      snapToBowl();
+      seatInBowl();
       originalComplete.call(step);
     };
     step.setEngagedCheck(function () {
-      return held;
+      return held || dropping;
     });
   }
 
@@ -320,6 +427,7 @@ export function bindSkullCap(ctx, sequence) {
   viewer.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp, true);
   window.addEventListener("pointercancel", onPointerUp, true);
+  viewer.addEventListener("lostpointercapture", onPointerUp);
   window.addEventListener("keydown", onKeyDown);
   sequence.onChange(onChange);
   sequence.onProcedureComplete(function () {
@@ -335,6 +443,7 @@ export function bindSkullCap(ctx, sequence) {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("pointerup", onPointerUp, true);
       window.removeEventListener("pointercancel", onPointerUp, true);
+      viewer.removeEventListener("lostpointercapture", onPointerUp);
       viewer.removeEventListener("pointermove", onPointerMove);
       if (marker.parent) marker.parent.remove(marker);
       restoreHome();

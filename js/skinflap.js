@@ -183,18 +183,27 @@ export function bindSkinFlap(ctx, sequence, curveJson) {
     queueRender();
   }
 
+  function unlockOrbit() {
+    if (holdId != null) {
+      try { viewer.releasePointerCapture(holdId); } catch (err) {}
+    }
+    holdId = null;
+    held = false;
+    viewer.cameraControls = true;
+    viewer.style.cursor = "";
+  }
+
   function complete() {
     latched = true;
     applyProgress(1);
-    held = false;
-    viewer.cameraControls = true;
+    unlockOrbit();
     if (step && !step.isComplete) step.completeStep();
     placeBead();
   }
 
   function reset() {
     latched = false;
-    held = false;
+    unlockOrbit();
     applyProgress(0);
   }
 
@@ -208,6 +217,7 @@ export function bindSkinFlap(ctx, sequence, curveJson) {
     step.completeStep = function () {
       latched = true;
       applyProgress(1);
+      unlockOrbit();
       originalComplete.call(step);
       placeBead();
     };
@@ -249,20 +259,13 @@ export function bindSkinFlap(ctx, sequence, curveJson) {
       return;
     }
     if (!live() || latched) return;
-    if (hitBead(event)) {
-      viewer.style.cursor = "grab";
-      viewer.cameraControls = false;
-    }
+    viewer.style.cursor = hitBead(event) ? "grab" : "";
   }
 
   function onPointerUp(event) {
     if (!held) return;
     if (holdId != null && event.pointerId !== holdId) return;
-    held = false;
-    holdId = null;
-    viewer.cameraControls = true;
-    viewer.style.cursor = "";
-    try { viewer.releasePointerCapture(event.pointerId); } catch (err) {}
+    unlockOrbit();
   }
 
   function track(now) {
@@ -300,6 +303,7 @@ export function bindSkinFlap(ctx, sequence, curveJson) {
   }
 
   function onChange() {
+    if (!live() && !latched) unlockOrbit();
     placeBead();
     applyPose(poseAmount());
     queueRender();
@@ -309,6 +313,7 @@ export function bindSkinFlap(ctx, sequence, curveJson) {
   viewer.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp, true);
   window.addEventListener("pointercancel", onPointerUp, true);
+  viewer.addEventListener("lostpointercapture", onPointerUp);
   sequence.onChange(onChange);
   sequence.onProcedureComplete(function () {
     bead.visible = false;
@@ -322,6 +327,7 @@ export function bindSkinFlap(ctx, sequence, curveJson) {
       cancelAnimationFrame(ticking);
       window.removeEventListener("pointerup", onPointerUp, true);
       window.removeEventListener("pointercancel", onPointerUp, true);
+      viewer.removeEventListener("lostpointercapture", onPointerUp);
       viewer.removeEventListener("pointermove", onPointerMove);
       if (group.parent) group.parent.remove(group);
       applyPose(0);
