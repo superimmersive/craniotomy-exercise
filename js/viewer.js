@@ -15,6 +15,10 @@ export const viewerReady = new Promise(function (resolve) {
 
   var zooming = false;
   var panning = false;
+  var touchPointers = Object.create(null);
+  var touchPanning = false;
+  var suppressTouchOrbit = false;
+  var lastPinchDist = 0;
   var lastY = 0;
   var lastPanX = 0;
   var lastPanY = 0;
@@ -143,6 +147,25 @@ export const viewerReady = new Promise(function (resolve) {
       viewer.setPointerCapture(event.pointerId);
       return;
     }
+    if (event.pointerType === "touch") {
+      touchPointers[event.pointerId] = { x: event.clientX, y: event.clientY };
+      if (touchPointerCount() >= 2) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        var mid = touchMidpoint();
+        touchPanning = true;
+        suppressTouchOrbit = true;
+        panning = false;
+        zooming = false;
+        if (mid) {
+          lastPanX = mid.x;
+          lastPanY = mid.y;
+          lastPinchDist = mid.dist;
+        }
+        if (!baseRadius) baseRadius = viewer.getCameraOrbit().radius;
+        return;
+      }
+    }
     if (event.button !== 2) return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -207,7 +230,83 @@ export const viewerReady = new Promise(function (resolve) {
     if (scene && typeof scene.queueRender === "function") scene.queueRender();
   }
 
+  function touchPointerCount() {
+    var n = 0;
+    for (var id in touchPointers) {
+      if (Object.prototype.hasOwnProperty.call(touchPointers, id)) n++;
+    }
+    return n;
+  }
+
+  function touchMidpoint() {
+    var a = null;
+    var b = null;
+    for (var id in touchPointers) {
+      if (!Object.prototype.hasOwnProperty.call(touchPointers, id)) continue;
+      if (!a) {
+        a = touchPointers[id];
+        continue;
+      }
+      b = touchPointers[id];
+      break;
+    }
+    if (!a || !b) return null;
+    var dx = b.x - a.x;
+    var dy = b.y - a.y;
+    return {
+      x: (a.x + b.x) * 0.5,
+      y: (a.y + b.y) * 0.5,
+      dist: Math.sqrt(dx * dx + dy * dy)
+    };
+  }
+
+  function forgetTouch(event) {
+    if (!event || event.pointerType !== "touch" || event.pointerId == null) return;
+    delete touchPointers[event.pointerId];
+    if (touchPointerCount() < 2) touchPanning = false;
+    if (touchPointerCount() === 0) suppressTouchOrbit = false;
+  }
+
+  function applyPinchZoom(dist) {
+    if (!(lastPinchDist > 8) || !(dist > 8)) return;
+    var orbit = viewer.getCameraOrbit();
+    var next = orbit.radius * (lastPinchDist / dist);
+    clampOrbitRadius(next);
+  }
+
+  function clampOrbitRadius(next) {
+    var orbit = viewer.getCameraOrbit();
+    var minR = baseRadius * 0.25;
+    var maxR = baseRadius * 4;
+    if (next < minR) next = minR;
+    if (next > maxR) next = maxR;
+    viewer.cameraOrbit = orbit.theta + "rad " + orbit.phi + "rad " + next + "m";
+    if (viewer.jumpCameraToGoal) viewer.jumpCameraToGoal();
+    applyCameraPan();
+  }
+
   viewer.addEventListener("pointermove", function (event) {
+    if (event.pointerType === "touch" && touchPointers[event.pointerId]) {
+      touchPointers[event.pointerId].x = event.clientX;
+      touchPointers[event.pointerId].y = event.clientY;
+    }
+    if (touchPanning && touchPointerCount() >= 2) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      var mid = touchMidpoint();
+      if (!mid) return;
+      panBy(mid.x - lastPanX, mid.y - lastPanY);
+      applyPinchZoom(mid.dist);
+      lastPanX = mid.x;
+      lastPanY = mid.y;
+      lastPinchDist = mid.dist;
+      return;
+    }
+    if (suppressTouchOrbit && event.pointerType === "touch") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
     if (panning) {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -222,16 +321,11 @@ export const viewerReady = new Promise(function (resolve) {
     var orbit = viewer.getCameraOrbit();
     var next = orbit.radius * Math.exp((event.clientY - lastY) * 0.008);
     lastY = event.clientY;
-    var minR = baseRadius * 0.35;
-    var maxR = baseRadius * 3.5;
-    if (next < minR) next = minR;
-    if (next > maxR) next = maxR;
-    viewer.cameraOrbit = orbit.theta + "rad " + orbit.phi + "rad " + next + "m";
-    if (viewer.jumpCameraToGoal) viewer.jumpCameraToGoal();
-    applyCameraPan();
+    clampOrbitRadius(next);
   }, true);
 
   function endDrag(event) {
+    forgetTouch(event);
     if (!zooming && !panning) return;
     zooming = false;
     panning = false;
@@ -242,6 +336,8 @@ export const viewerReady = new Promise(function (resolve) {
 
   viewer.addEventListener("pointerup", endDrag, true);
   viewer.addEventListener("pointercancel", endDrag, true);
+  window.addEventListener("pointerup", forgetTouch, true);
+  window.addEventListener("pointercancel", forgetTouch, true);
   viewer.addEventListener("contextmenu", function (event) {
     event.preventDefault();
     event.stopImmediatePropagation();
